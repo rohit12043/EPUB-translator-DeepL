@@ -27,11 +27,12 @@ def setup_logging():
         ]
     )
     logging.getLogger().setLevel(logging.DEBUG)
-    logging.getLogger('deepl').setLevel(logging.DEBUG)
+    logging.getLogger('deepl_translator').setLevel(logging.DEBUG)
     logging.getLogger('epub_handler').setLevel(logging.DEBUG)
     logging.getLogger('undetected_chromedriver').setLevel(logging.WARNING)
+    return logging.getLogger(__name__)
 
-logger = setup_logging
+logger = setup_logging()
 
 def run_gui():
     """Runs the EPUB Translator with a Graphical User Interface."""
@@ -44,7 +45,7 @@ def run_gui():
         
         logger.info('Initializing the GUI')
         app = EPUBTranslatorGUI()
-        logger('Starting GUI application...')
+        logger.info('Starting GUI application...')
         app.run()
     except tk.TclError as e:
         logger.error(f"Tkinter error: {e}", exc_info=True)

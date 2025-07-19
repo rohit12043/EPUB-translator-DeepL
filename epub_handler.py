@@ -33,7 +33,7 @@ class CheckpointManager:
         self.logger = logging.getLogger(__name__)
         self._load_checkpoint()
         
-    def load_checkpoint(self) -> None:
+    def _load_checkpoint(self) -> None:
         try:
             if os.path.exists(self.checkpoint_file):
                 with open(self.checkpoint_file, 'r', encoding='utf-8') as f:
@@ -53,7 +53,7 @@ class CheckpointManager:
             item_data = self.checkpoint_data.setdefault(checkpoint_key, {}).setdefault(item_id, {'lines': {}})
             lines = item_data['lines']
             
-            lines[f"{chunk_key}_line{line_index}"] = json.dump(line_data)
+            lines[f"{chunk_key}_line{line_index}"] = json.dumps(line_data)
             
             
             with open(self.checkpoint_file, 'w', encoding='utf-8') as f:
@@ -72,14 +72,14 @@ class CheckpointManager:
         except Exception as e:
             self.logger.error(f"Failed to set completed status for {item_id}: {e}")
             
-class EpubTranslator:
+class EPUBTranslator:
     def __init__(self, source_lang: str, target_lang: str, browser: Optional[webdriver.Chrome] = None):
         self.logger = logging.getLogger(__name__)
         self.source_lang = source_lang
         self.target_lang = target_lang
         self.book = None
         # XHTML files containing these words will be excluded from translation process
-        self.excluded_keywords = ['toc', 'nav', 'cover', 'title', 'index', 'info']
+        self.excluded_keywords = ['toc', 'nav', 'cover', 'title', 'index', 'info', 'copyright']
         self.total_sections  = 0
         self.current_section = 0
         self.browser = browser
@@ -87,16 +87,16 @@ class EpubTranslator:
     
     def load_epub(self, filepath: str) -> bool:
         try:
-            self.logger.infO(f"Loading EPUB: {filepath}")
+            self.logger.info(f"Loading EPUB: {filepath}")
             self.book = epub.read_epub(filepath)
             self.total_sections = len(self.get_content_items())
             if self.total_sections == 0:
                 raise ValueError("No content sections found in EPUB")
             self.logger.info(f"Found {self.total_sections} content sections")
-            self.checkpoint_manager.load_checkpoint()
+            self.checkpoint_manager._load_checkpoint()
             return True
         except Exception as e:
-            self.logger.error(f"Failed to load EPUB file: {e}", exc_info=True)
+            self.logger.error(f"Failed to load EPUB: {e}", exc_info=True)
             return False
         
     def get_content_items(self) -> List:
@@ -206,13 +206,14 @@ class EpubTranslator:
                     self.logger.info(f"Found {len(texts_to_translate)} untranslated segments.")
                     text_chunks = self.intelligent_chunk_text(texts_to_translate, translator.max_input_length)
                     
+                    chunk_start_index = 0
                     newly_translated_lines = []
                     
                     for j, chunk in enumerate(text_chunks):
                         if stop_flag and stop_flag(): break
                         self.logger.info(f"Translating chunk {j + 1}/{len(text_chunks)}...")
 
-                        translated_chunk = translator.translate_chunk_with_verification(chunk)
+                        translated_chunk = translator._translate_chunk_with_verification(chunk, stop_flag=stop_flag)
                         translated_chunk = re.sub(r'Translated with DeepL\.com \(free version\)', '', translated_chunk).strip()                  
                 
                         if "[[TRANSLATION FAILED" in translated_chunk:
@@ -226,7 +227,7 @@ class EpubTranslator:
                             original_idx = untranslated_indices_map[new_idx]
                             is_dialogue = bool(re.match(r'^\s*["“‘]', translated_text.strip()))
                             line_data = {'text': translated_text, 'is_dialogue': is_dialogue}
-                            self.checkpoint_manager.save_checkpoint(checkpoint_key, item_id, "chunk0", original_idx, line_data)
+                            self.checkpoint_manager.save_checkpoint(checkpoint_key, item_id, f"chunk{j}", original_idx, line_data)
                     else:
                         self.logger.error(f"CRITICAL ALIGNMENT FAILURE in {item_id}. Original count: {len(texts_to_translate)}, translated count: {len(newly_translated_lines)}. Skipping this section.")
                         continue # Skip to next file
@@ -259,11 +260,11 @@ class EpubTranslator:
                 if html_tag: html_tag['lang'] = self.target_lang
                 item.set_content(str(soup).encode('utf-8'))
                 
-                self.save_intermediate_epub(temp_output_path)
+                self._save_intermediate_epub(temp_output_path)
                 self.checkpoint_manager.set_completed(checkpoint_key, item_id)
                 if progress_callback: progress_callback((i + 1) / self.total_sections * 100)
             
-            self.save_final_epub(output_path)
+            self._save_final_epub(output_path)
             if os.path.exists(temp_output_path): os.remove(temp_output_path)
             return True
                 
@@ -291,7 +292,7 @@ class EpubTranslator:
             
             # Dialogue Styling
             # Check if node is already in an <em> or <i> tag.
-            if node.paren.name in ['em', 'i']:
+            if node.parent.name in ['em', 'i']:
                 # If so, just replace the text content.
                 node.replace_with(NavigableString(final_text))
             elif is_dialogue:
@@ -303,7 +304,7 @@ class EpubTranslator:
                 # Otherwise, it's plain text
                 node.replace_with(NavigableString(final_text))
                             
-    def save_intermediate_epub(self, filepath: str):
+    def _save_intermediate_epub(self, filepath: str):
         try:
             epub.write_epub(filepath, self.book)
             self.logger.info(f"Intermediate EPUB saved: {filepath}")
@@ -311,7 +312,7 @@ class EpubTranslator:
             self.logger.error(f"Failed to save Intermediate EPUB: {e}")
             raise
         
-    def save_final_epub(self, filepath: str):
+    def _save_final_epub(self, filepath: str):
         try:
             epub.write_epub(filepath, self.book)
             self.logger.info(f"Final EPUB saved: {filepath}")
@@ -355,7 +356,7 @@ class EpubTranslator:
         self.book = None
         self.total_sections = 0
         self.current_section = 0
-        if self.browser():
+        if self.browser:
             try:
                 self.browser.quit()
             except Exception as e:
